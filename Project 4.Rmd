@@ -1,0 +1,195 @@
+---
+title: 'Project 4: Document Classification'
+author: "Subhalaxmi Rout"
+date: "`r Sys.Date()`"
+output: rmdformats::readthedown
+---
+
+
+###  Introduction
+
+For this project, I will be classifying emails using the ham and spam dataset. I will use Naive Bayes Algorithm to create a model. After creating the model, I will predict the model and check the accuracy of the model.
+
+### Data Loading
+
+I need to change the data into a usable form, before classifying the emails. This process involves reading in the emails, putting the emails into a dataframe, creating the corpus, and creating a document term matrix and use the data to train models for classfication.
+
+Loading required libraries.
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidytext)
+library(tm)
+library(stringr)
+library(DT)
+library(readtext)
+library(wordcloud)
+library(e1071)
+library(gmodels)
+```
+
+
+### Text processing and transformation
+
+Download the zip files from https://spamassassin.apache.org/old/publiccorpus/. 
+Unzip and paste the files in my working directory. Selected `20021010_spam.tar` and `20021010_easy_ham.tar` file to do the classification.
+
+Read the files from easy_ham and spam folder. I Created a user-defined function which read each email present in the folders.
+
+```{r message=FALSE, warning=FALSE}
+ham_diretory="/Users/subhalaxmirout/DATA607 Lab1/Project 4/easy_ham"
+ham_file_names = list.files(ham_diretory)
+
+# List of docs, aassign a list with "NA"
+ham_docs_list <- NA
+# using for loop read file one by one stored all the ham emails in a list
+for(i in 1:length(ham_file_names))
+{
+  file_path<-paste0(ham_diretory, "/", ham_file_names[1])  
+  text <-readLines(file_path)
+  ham_list<- list(paste(text, collapse="\n"))
+  ham_docs_list = c(ham_docs_list,ham_list)
+  
+}
+
+# set the data as a data frame
+ham_df <-as.data.frame(unlist(ham_docs_list),stringsAsFactors = FALSE)
+# 
+ham_df$type <- "ham"
+# rename the column name
+colnames(ham_df) <- c("text","type")
+
+# Create Spam Dataframe
+spam_diretory="/Users/subhalaxmirout/DATA607 Lab1/Project 4/spam"
+spam_file_names = list.files(spam_diretory)
+
+spam_docs_list <- NA
+for(i in 1:length(spam_file_names))
+{
+  file_path<-paste0(spam_diretory, "/", spam_file_names[1])  
+  text <-readLines(file_path)
+  spam_list<- list(paste(text, collapse="\n"))
+  spam_docs_list = c(spam_docs_list,spam_list)
+  
+}
+
+# set the data as a data frame
+spam_df <-as.data.frame(unlist(spam_docs_list),stringsAsFactors = FALSE)
+spam_df$type <- "spam"
+# rename the column name
+colnames(spam_df) <- c("text","type")
+```
+
+Combine the dataset into one data frame.
+
+```{r message=FALSE, warning=FALSE}
+# creating combined data frame of spam and ham
+spam_ham_df <- rbind(ham_df, spam_df)
+spam_ham_df = cbind(spam_ham_df,DocID = seq(1,length(spam_ham_df$text)))
+tibble::tibble(spam_ham_df)
+```
+
+### Create Corpus dataset
+Create a corpus data set and clean the data such as remove numbers, punctuations, stops words, and whitespace etc.
+
+```{r message=FALSE, warning=FALSE}
+# create corpus
+Corpus <- Corpus(VectorSource(spam_ham_df$text))
+Corpus <- tm_map(Corpus, removeNumbers)
+Corpus <- tm_map(Corpus, removePunctuation)
+Corpus <- tm_map(Corpus, removeWords, stopwords())
+Corpus <- tm_map(Corpus, stripWhitespace)
+```
+
+### Word cloud
+Create word cloud for spam emails and ham emails, to see the most frequent words used for spam and ham.
+
+```{r fig.height=12, fig.width=10, message=FALSE, warning=FALSE}
+# word cloud for spam emails
+dtm <- DocumentTermMatrix(Corpus)
+
+spam_indices <- which(spam_ham_df$type == "spam")
+suppressWarnings(wordcloud(Corpus[spam_indices], min.freq=50,random.color = TRUE,colors=palette()))
+
+# word cloud for ham emails
+ham_indices <- which(spam_ham_df$type == "ham")
+suppressWarnings(wordcloud(Corpus[ham_indices], min.freq=50,random.color = TRUE,colors=palette()))
+```
+
+### Train and Test data
+
+Divided data set in to 2 part train and test. Train data contains 70% of data and test contains 30% of data.
+
+```{r message=FALSE, warning=FALSE}
+# sample 70% data traning and 30 % for prediction
+sample_df <- floor(0.70 * nrow(spam_ham_df))
+
+# set the seed to make result reproductible
+set.seed(124)
+train_ind <- sample(seq_len(nrow(spam_ham_df)), size = sample_df)
+
+train_spam_ham <- spam_ham_df[train_ind, ]
+test_spam_ham <- spam_ham_df[-train_ind, ]
+
+# count of spam and ham in train data set
+spam<-subset(train_spam_ham,train_spam_ham$type == "spam")
+ham<-subset(train_spam_ham,train_spam_ham$type == "ham")
+
+# Create corpus for training and test data
+train_corpus <- Corpus(VectorSource(train_spam_ham$text))
+test_corpus <- Corpus(VectorSource(test_spam_ham$text))
+
+# Remove numbers
+train_corpus <- tm_map(train_corpus ,removeNumbers)
+test_corpus <- tm_map(test_corpus, removeNumbers)
+# Remove punctuations
+train_corpus <- tm_map(train_corpus, removePunctuation)
+test_corpus <- tm_map(test_corpus, removePunctuation)
+# Remove stop words
+train_corpus <- tm_map(train_corpus, removeWords, stopwords())
+test_corpus  <- tm_map(test_corpus, removeWords, stopwords())
+# Remove white spaces
+train_clean_corpus<- tm_map(train_corpus, stripWhitespace)
+test_clean_corpus<- tm_map(test_corpus, stripWhitespace)
+# Create corpus for train and test 
+train_dtm <- DocumentTermMatrix(train_corpus)
+test_dtm <- DocumentTermMatrix(test_corpus)
+
+# count function
+convert_count <- function(x) {
+  y <- ifelse(x > 0, 1,0)
+  y <- factor(y, levels=c(0,1), labels=c("No", "Yes"))
+  y
+}
+
+train_sample <- apply(train_dtm, 2, convert_count)
+test_sample <- apply(test_dtm, 2, convert_count)
+```
+
+### Modeling
+
+Create model using Naive Bayes Algorithm and find the accuracy.
+
+```{r message=FALSE, warning=FALSE}
+# classification of email
+classifier_nb <- naiveBayes(train_sample, factor(train_spam_ham$type))
+
+test_pred_nb <- predict(classifier_nb, newdata=test_sample)
+
+prop.table(table(test_pred_nb, test_spam_ham$type))
+
+CrossTable(test_pred_nb,test_spam_ham$type, prop.chisq = FALSE,prop.t = FALSE, dnn = c("Predicted", "Actual"))
+
+```
+
+### Summary
+
++ Analysis of word counts in the Spam and Ham emails revealed differences in the most commonly occurring words.
++ Accuracy of Naive Bayes model is 100%.
+
+##### References
+
++ https://www.youtube.com/watch?v=qjSeedeF4KQ
++ https://www.youtube.com/watch?v=sujx3MjEH_0
+
+
